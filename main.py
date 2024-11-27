@@ -230,11 +230,185 @@ def main_menu(user_id):
 
     tk.Label(menu_window, text="Main Menu", font=("Arial", 16)).pack(pady=20)
 
-    tk.Button(menu_window, text="1. 재산관리", width=20).pack(pady=10)
+    tk.Button(menu_window, text="1. 재산관리", width=20, command=lambda: manage_monthly_assets(user_id)).pack(pady=10)
     tk.Button(menu_window, text="2. 고정수입입력", width=20, command=lambda: input_fixed_income(user_id)).pack(pady=10)
     tk.Button(menu_window, text="3. 고정지출입력", width=20, command=lambda: input_fixed_expense(user_id)).pack(pady=10)
     tk.Button(menu_window, text="4. 고정저축입력", width=20, command=lambda: input_fixed_saving(user_id)).pack(pady=10)
     tk.Button(menu_window, text="5. 구성원 정산", width=20).pack(pady=10)
+
+# 재산관리
+def manage_monthly_assets(user_id):
+    def save_monthcost():
+        year = entry_year.get()
+        month = entry_month.get()
+
+        if not year.isdigit() or not month.isdigit() or not (1 <= int(month) <= 12):
+            messagebox.showerror("Input Error", "Year and Month must be valid numbers!")
+            return
+
+        conn = connect_to_db()
+        if conn:
+            cursor = conn.cursor()
+            try:
+                # 월 데이터 존재 확인
+                cursor.execute(
+                    "SELECT id FROM Monthcost WHERE user_id = %s AND year = %s AND month = %s",
+                    (user_id, year, month)
+                )
+                record = cursor.fetchone()
+                if not record:
+                    # Insert
+                    cursor.execute(
+                        "INSERT INTO Monthcost (user_id, year, month) VALUES (%s, %s, %s)",
+                        (user_id, year, month)
+                    )
+                    conn.commit()
+                monthcost_id = record[0] if record else cursor.lastrowid
+                # 수정: user_id 추가 전달
+                monthly_management_window(user_id, year, month, monthcost_id)
+            except mysql.connector.Error as err:
+                messagebox.showerror("Database Error", f"Error: {err}")
+            finally:
+                cursor.close()
+                conn.close()
+
+    asset_window = tk.Toplevel()
+    asset_window.title("Manage Monthly Assets")
+
+    tk.Label(asset_window, text="Year").pack(pady=5)
+    entry_year = tk.Entry(asset_window)
+    entry_year.pack(pady=5)
+
+    tk.Label(asset_window, text="Month (1-12)").pack(pady=5)
+    entry_month = tk.Entry(asset_window)
+    entry_month.pack(pady=5)
+
+    tk.Button(asset_window, text="Proceed", command=save_monthcost).pack(pady=10)
+
+
+# 월별 자산 관리
+def monthly_management_window(user_id, year, month, monthcost_id):
+    def add_income():
+        add_transaction("Income", monthcost_id)
+
+    def add_expense():
+        add_transaction("Expense", monthcost_id)
+
+    def add_saving():
+        add_transaction("Saving", monthcost_id)
+
+    def view_assets():
+        conn = connect_to_db()
+        if conn:
+            cursor = conn.cursor(dictionary=True)
+            try:
+                # Fixed Costs
+                cursor.execute(
+                    "SELECT fixed_income, fixed_expense, fixed_saving FROM Fixedcost WHERE user_id = %s AND year = %s",
+                    (user_id, year)
+                )
+                fixed = cursor.fetchone() or {"fixed_income": 0, "fixed_expense": 0, "fixed_saving": 0}
+
+                # Additional Transactions
+                cursor.execute(
+                    "SELECT SUM(cost) AS total_income FROM Income WHERE month_id = %s", (monthcost_id,)
+                )
+                additional_income = cursor.fetchone()["total_income"] or 0
+
+                cursor.execute(
+                    "SELECT SUM(cost) AS total_expense FROM Expense WHERE month_id = %s", (monthcost_id,)
+                )
+                additional_expense = cursor.fetchone()["total_expense"] or 0
+
+                cursor.execute(
+                    "SELECT SUM(cost) AS total_saving FROM Saving WHERE month_id = %s", (monthcost_id,)
+                )
+                additional_saving = cursor.fetchone()["total_saving"] or 0
+
+                # Calculations
+                monthly_asset = (
+                    fixed["fixed_income"]
+                    - fixed["fixed_expense"]
+                    - fixed["fixed_saving"]
+                    + additional_income
+                    - additional_expense
+                    - additional_saving
+                )
+                monthly_saving = fixed["fixed_saving"] + additional_saving
+
+                messagebox.showinfo(
+                    "Monthly Assets",
+                    f"이번달 자산: {monthly_asset}\n이번달 저축량: {monthly_saving}"
+                )
+            except mysql.connector.Error as err:
+                messagebox.showerror("Database Error", f"Error: {err}")
+            finally:
+                cursor.close()
+                conn.close()
+
+    # Create the management window
+    management_window = tk.Toplevel()
+    management_window.title(f"{month}월 자산 관리")
+
+    tk.Label(management_window, text=f"{month}월 자산 관리", font=("Arial", 16)).pack(pady=20)
+    tk.Button(management_window, text="1. 추가 수입", width=20, command=add_income).pack(pady=10)
+    tk.Button(management_window, text="2. 추가 지출", width=20, command=add_expense).pack(pady=10)
+    tk.Button(management_window, text="3. 추가 저축", width=20, command=add_saving).pack(pady=10)
+    tk.Button(management_window, text="4. 이번달 자산 확인", width=20, command=view_assets).pack(pady=10)
+
+
+# 추가 거래 (수입/지출/저축)
+def add_transaction(table, monthcost_id, year, month):
+    def save_transaction():
+        day = entry_day.get()
+        cost = entry_cost.get()
+        content = entry_content.get()
+
+        if not day.isdigit() or not (1 <= int(day) <= 31):
+            messagebox.showerror("Input Error", "Day must be a valid number between 1 and 31!")
+            return
+        if not cost.isdigit() or not content:
+            messagebox.showerror("Input Error", "Please provide valid inputs for all fields!")
+            return
+
+        # 날짜 구성: YYYY-MM-DD
+        date = f"{year}-{int(month):02d}-{int(day):02d}"
+
+        conn = connect_to_db()
+        if conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    f"INSERT INTO {table} (month_id, date, cost, content) VALUES (%s, %s, %s, %s)",
+                    (monthcost_id, date, cost, content)
+                )
+                conn.commit()
+                messagebox.showinfo("Success", f"{table} added successfully!")
+                transaction_window.destroy()
+            except mysql.connector.Error as err:
+                messagebox.showerror("Database Error", f"Error: {err}")
+            finally:
+                cursor.close()
+                conn.close()
+
+    transaction_window = tk.Toplevel()
+    transaction_window.title(f"Add {table}")
+
+    tk.Label(transaction_window, text="Day (1-31)").pack(pady=5)
+    entry_day = tk.Entry(transaction_window)
+    entry_day.pack(pady=5)
+
+    tk.Label(transaction_window, text="Cost").pack(pady=5)
+    entry_cost = tk.Entry(transaction_window)
+    entry_cost.pack(pady=5)
+
+    tk.Label(transaction_window, text="Details").pack(pady=5)
+    entry_content = tk.Entry(transaction_window)
+    entry_content.pack(pady=5)
+
+    tk.Button(transaction_window, text="Save", command=save_transaction).pack(pady=10)
+
+
 
 # 로그인 함수
 def login():
