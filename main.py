@@ -289,13 +289,13 @@ def manage_monthly_assets(user_id):
 # 월별 자산 관리
 def monthly_management_window(user_id, year, month, monthcost_id):
     def add_income():
-        add_transaction("Income", monthcost_id)
+        add_transaction("Income", monthcost_id, year, month)
 
     def add_expense():
-        add_transaction("Expense", monthcost_id)
+        add_transaction("Expense", monthcost_id, year, month)
 
     def add_saving():
-        add_transaction("Saving", monthcost_id)
+        add_transaction("Saving", monthcost_id, year, month)
 
     def view_assets():
         conn = connect_to_db()
@@ -346,7 +346,6 @@ def monthly_management_window(user_id, year, month, monthcost_id):
                 cursor.close()
                 conn.close()
 
-    # Create the management window
     management_window = tk.Toplevel()
     management_window.title(f"{month}월 자산 관리")
 
@@ -355,6 +354,7 @@ def monthly_management_window(user_id, year, month, monthcost_id):
     tk.Button(management_window, text="2. 추가 지출", width=20, command=add_expense).pack(pady=10)
     tk.Button(management_window, text="3. 추가 저축", width=20, command=add_saving).pack(pady=10)
     tk.Button(management_window, text="4. 이번달 자산 확인", width=20, command=view_assets).pack(pady=10)
+
 
 
 # 추가 거래 (수입/지출/저축)
@@ -407,7 +407,6 @@ def add_transaction(table, monthcost_id, year, month):
     entry_content.pack(pady=5)
 
     tk.Button(transaction_window, text="Save", command=save_transaction).pack(pady=10)
-
 
 
 # 로그인 함수
