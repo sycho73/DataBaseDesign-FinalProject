@@ -223,6 +223,109 @@ def input_fixed_saving(user_id):
 
     tk.Button(saving_window, text="Save", command=save_fixed_saving).pack(pady=10)
 
+def calculate_family_assets(user_id):
+    def fetch_family_assets():
+        year = entry_year.get()
+        month = entry_month.get()
+
+        if not year.isdigit() or not month.isdigit() or not (1 <= int(month) <= 12):
+            messagebox.showerror("Input Error", "Year and Month must be valid numbers!")
+            return
+
+        conn = connect_to_db()
+        if conn:
+            cursor = conn.cursor(dictionary=True)
+            try:
+                # 현재 사용자의 familyname 조회
+                cursor.execute("SELECT familyname FROM Users WHERE id = %s", (user_id,))
+                family_row = cursor.fetchone()
+                if not family_row:
+                    messagebox.showerror("Error", "User not found!")
+                    return
+                
+                familyname = family_row["familyname"]
+
+                # 같은 familyname을 가진 모든 구성원 ID 조회
+                cursor.execute("SELECT id, name FROM Users WHERE familyname = %s", (familyname,))
+                family_members = cursor.fetchall()
+
+                if not family_members:
+                    messagebox.showinfo("Info", "No family members found.")
+                    return
+
+                total_asset = 0
+                total_saving = 0
+
+                # 모든 구성원에 대해 지정된 연도/월까지 정산 계산
+                for member in family_members:
+                    member_id = member["id"]
+                    member_name = member["name"]
+
+                    # 1월부터 입력받은 월까지 계산
+                    for m in range(1, int(month) + 1):
+                        cursor.execute(
+                            """
+                            SELECT 
+                                IFNULL(fc.fixed_income, 0) AS fixed_income,
+                                IFNULL(fc.fixed_expense, 0) AS fixed_expense,
+                                IFNULL(fc.fixed_saving, 0) AS fixed_saving,
+                                (SELECT SUM(cost) FROM Income i WHERE i.month_id = mc.id) AS additional_income,
+                                (SELECT SUM(cost) FROM Expense e WHERE e.month_id = mc.id) AS additional_expense,
+                                (SELECT SUM(cost) FROM Saving s WHERE s.month_id = mc.id) AS additional_saving
+                            FROM Monthcost mc
+                            LEFT JOIN Fixedcost fc ON fc.user_id = mc.user_id AND fc.year = mc.year
+                            WHERE mc.user_id = %s AND mc.year = %s AND mc.month = %s
+                            """,
+                            (member_id, year, m)
+                        )
+                        monthly_data = cursor.fetchone()
+                        if monthly_data:
+                            # 자산 및 저축량 계산
+                            monthly_asset = (
+                                monthly_data["fixed_income"]
+                                - monthly_data["fixed_expense"]
+                                - monthly_data["fixed_saving"]
+                                + (monthly_data["additional_income"] or 0)
+                                - (monthly_data["additional_expense"] or 0)
+                                - (monthly_data["additional_saving"] or 0)
+                            )
+                            monthly_saving = (
+                                monthly_data["fixed_saving"]
+                                + (monthly_data["additional_saving"] or 0)
+                            )
+
+                            # 합산
+                            total_asset += monthly_asset
+                            total_saving += monthly_saving
+
+                # 결과 출력
+                messagebox.showinfo(
+                    "Family Assets",
+                    f"{familyname} 구성원의 정산 결과\n\n"
+                    f"총 자산: {total_asset}\n총 저축량: {total_saving}"
+                )
+
+            except mysql.connector.Error as err:
+                messagebox.showerror("Database Error", f"Error: {err}")
+            finally:
+                cursor.close()
+                conn.close()
+
+    # GUI 구성
+    family_window = tk.Toplevel()
+    family_window.title("Family Asset Calculation")
+
+    tk.Label(family_window, text="Enter Year").pack(pady=5)
+    entry_year = tk.Entry(family_window)
+    entry_year.pack(pady=5)
+
+    tk.Label(family_window, text="Enter Month (1-12)").pack(pady=5)
+    entry_month = tk.Entry(family_window)
+    entry_month.pack(pady=5)
+
+    tk.Button(family_window, text="Calculate", command=fetch_family_assets).pack(pady=10)
+
+
 # 메인 화면으로 이동
 def main_menu(user_id):
     menu_window = tk.Toplevel()
@@ -234,7 +337,7 @@ def main_menu(user_id):
     tk.Button(menu_window, text="2. 고정수입입력", width=20, command=lambda: input_fixed_income(user_id)).pack(pady=10)
     tk.Button(menu_window, text="3. 고정지출입력", width=20, command=lambda: input_fixed_expense(user_id)).pack(pady=10)
     tk.Button(menu_window, text="4. 고정저축입력", width=20, command=lambda: input_fixed_saving(user_id)).pack(pady=10)
-    tk.Button(menu_window, text="5. 구성원 정산", width=20).pack(pady=10)
+    tk.Button(menu_window, text="4. 구성원 정산", width=20, command=lambda: calculate_family_assets(user_id)).pack(pady=10)
 
 # 재산관리
 def manage_monthly_assets(user_id):
@@ -325,6 +428,15 @@ def monthly_management_window(user_id, year, month, monthcost_id):
                 )
                 additional_saving = cursor.fetchone()["total_saving"] or 0
 
+                cursor.execute("SELECT date, content, cost FROM Income WHERE month_id = %s", (monthcost_id,))
+                incomes = cursor.fetchall()
+
+                cursor.execute("SELECT date, content, cost FROM Expense WHERE month_id = %s", (monthcost_id,))
+                expenses = cursor.fetchall()
+
+                cursor.execute("SELECT date, content, cost FROM Saving WHERE month_id = %s", (monthcost_id,))
+                savings = cursor.fetchall()
+
                 # Calculations
                 monthly_asset = (
                     fixed["fixed_income"]
@@ -336,10 +448,24 @@ def monthly_management_window(user_id, year, month, monthcost_id):
                 )
                 monthly_saving = fixed["fixed_saving"] + additional_saving
 
-                messagebox.showinfo(
-                    "Monthly Assets",
-                    f"이번달 자산: {monthly_asset}\n이번달 저축량: {monthly_saving}"
+                result_message = (
+                    f"이번달 자산: {monthly_asset}\n"
+                    f"이번달 저축량: {monthly_saving}\n\n"
+                    "---- 추가 수입 ----\n"
                 )
+                for income in incomes:
+                    result_message += f"{income['date']}: {income['content']} ({income['cost']}원)\n"
+
+                result_message += "\n---- 추가 지출 ----\n"
+                for expense in expenses:
+                    result_message += f"{expense['date']}: {expense['content']} ({expense['cost']}원)\n"
+
+                result_message += "\n---- 추가 저축 ----\n"
+                for saving in savings:
+                    result_message += f"{saving['date']}: {saving['content']} ({saving['cost']}원)\n"
+
+                # Show the result in a messagebox
+                messagebox.showinfo("Monthly Assets", result_message)
             except mysql.connector.Error as err:
                 messagebox.showerror("Database Error", f"Error: {err}")
             finally:
