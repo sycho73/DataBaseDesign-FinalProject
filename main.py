@@ -337,7 +337,7 @@ def main_menu(user_id):
     tk.Button(menu_window, text="2. 고정수입입력", width=20, command=lambda: input_fixed_income(user_id)).pack(pady=10)
     tk.Button(menu_window, text="3. 고정지출입력", width=20, command=lambda: input_fixed_expense(user_id)).pack(pady=10)
     tk.Button(menu_window, text="4. 고정저축입력", width=20, command=lambda: input_fixed_saving(user_id)).pack(pady=10)
-    tk.Button(menu_window, text="4. 구성원 정산", width=20, command=lambda: calculate_family_assets(user_id)).pack(pady=10)
+    tk.Button(menu_window, text="5. 구성원 정산", width=20, command=lambda: calculate_family_assets(user_id)).pack(pady=10)
 
 # 재산관리
 def manage_monthly_assets(user_id):
